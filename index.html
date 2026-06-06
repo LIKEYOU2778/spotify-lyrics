@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Apple Music 沉浸式歌词同步</title>
+    <style>
+        :root {
+            /* 经典 Apple Music 暗色主题 */
+            --bg-base: #000000;
+            --text-normal: rgba(255, 255, 255, 0.22);
+            --text-active: #ffffff;
+            --glass-bg: rgba(255, 255, 255, 0.08);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --shadow: rgba(0, 0, 0, 0.6);
+            --text-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
+            --blob-opacity: 0.55;
+            --line-padding: 24px;
+            --lyric-font-size: 2.3rem;
+        }
+
+        .light-theme {
+            /* 经典 Apple Music 浅色亮白主题 */
+            --bg-base: #f5f5f7;
+            --text-normal: rgba(0, 0, 0, 0.25);
+            --text-active: #000000;
+            --glass-bg: rgba(0, 0, 0, 0.05);
+            --glass-border: rgba(0, 0, 0, 0.06);
+            --shadow: rgba(0, 0, 0, 0.08);
+            --text-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+            --blob-opacity: 0.45;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent !important;
+            -webkit-user-drag: none;
+            outline: none !important;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-base);
+            color: var(--text-normal);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: background-color 1s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        /* Apple Music 极光背景 */
+        .ambient-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: -2;
+            background-color: var(--bg-base);
+            transition: background-color 1s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        .bg-layer {
+            position: absolute;
+            width: 130%;
+            height: 130%;
+            top: -15%;
+            left: -15%;
+            opacity: 0;
+            filter: blur(140px);
+            transform: scale(1.05); 
+            transition: opacity 2.5s cubic-bezier(0.25, 1, 0.5, 1);
+            will-change: opacity;
+        }
+
+        .bg-layer.active {
+            opacity: var(--blob-opacity);
+        }
+
+        .blob {
+            position: absolute;
+            width: 80vmax;
+            height: 80vmax;
+            border-radius: 50%;
+            mix-blend-mode: screen;
+            will-change: transform;
+        }
+        
+        .light-theme .blob {
+            mix-blend-mode: multiply;
+        }
+
+        .layer-1 .blob-1 { background-color: #ff2d55; animation: fluidMove1 38s infinite alternate ease-in-out; }
+        .layer-1 .blob-2 { background-color: #5856d6; animation: fluidMove2 42s infinite alternate ease-in-out; }
+        .layer-1 .blob-3 { background-color: #af52de; animation: fluidMove3 35s infinite alternate ease-in-out; }
+        .layer-1 .blob-4 { background-color: #007aff; animation: fluidMove4 40s infinite alternate ease-in-out; }
+
+        .layer-2 .blob-1 { background-color: #ff9500; animation: fluidMove1 38s infinite alternate ease-in-out; }
+        .layer-2 .blob-2 { background-color: #ff2d55; animation: fluidMove2 42s infinite alternate ease-in-out; }
+        .layer-2 .blob-3 { background-color: #1bad58; animation: fluidMove3 35s infinite alternate ease-in-out; }
+        .layer-2 .blob-4 { background-color: #5856d6; animation: fluidMove4 40s infinite alternate ease-in-out; }
+
+        @keyframes fluidMove1 {
+            0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+            50% { transform: translate(15%, 10%) scale(1.1) rotate(120deg); }
+            100% { transform: translate(-8%, -15%) scale(0.9) rotate(240deg); }
+        }
+
+        @keyframes fluidMove2 {
+            0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+            50% { transform: translate(-10%, -15%) scale(0.85) rotate(-120deg); }
+            100% { transform: translate(15%, 8%) scale(1.05) rotate(120deg); }
+        }
+
+        @keyframes fluidMove3 {
+            0% { transform: translate(0, 0) scale(1.05) rotate(0deg); }
+            50% { transform: translate(8%, -18%) scale(0.95) rotate(90deg); }
+            100% { transform: translate(-15%, 12%) scale(1.1) rotate(180deg); }
+        }
+
+        @keyframes fluidMove4 {
+            0% { transform: translate(0, 0) scale(0.9) rotate(0deg); }
+            50% { transform: translate(-12%, 15%) scale(1.05) rotate(-90deg); }
+            100% { transform: translate(10%, -8%) scale(0.95) rotate(90deg); }
+        }
+
+        /* 基础布局 */
+        .main-layout {
+            display: flex;
+            width: 100%;
+            height: 100vh;
+            z-index: 10;
+        }
+
+        /* 左侧控制区（PC端） */
+        .player-panel {
+            width: 42%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 50px;
+            position: relative;
+            border-right: 1px solid rgba(255,255,255,0.03);
+        }
+
+        .album-container {
+            position: relative;
+            width: 320px;
+            height: 320px;
+            margin-bottom: 35px;
+            perspective: 1000px;
+        }
+
+        .album-art {
+            width: 100%;
+            height: 100%;
+            border-radius: 20px;
+            background-size: cover;
+            background-position: center;
+            box-shadow: 0 30px 60px var(--shadow);
+            cursor: pointer;
+            transform-style: preserve-3d;
+            transition: transform 0.1s ease, box-shadow 0.5s ease;
+        }
+
+        .album-art::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            border-radius: 20px;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+            pointer-events: none;
+        }
+
+        .track-metadata {
+            text-align: center;
+            max-width: 90%;
+            margin-bottom: 30px;
+        }
+
+        .track-name {
+            font-size: 2.1rem;
+            font-weight: 800;
+            color: var(--text-active);
+            margin: 0 0 10px 0;
+            letter-spacing: -0.8px;
+            text-shadow: var(--text-shadow);
+        }
+
+        .artist-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-normal);
+            margin: 0;
+            letter-spacing: -0.2px;
+        }
+
+        .control-bar {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            align-items: center;
+            width: 100%;
+            max-width: 340px;
+        }
+
+        .buttons-row {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .btn {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            color: var(--text-active);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            padding: 12px 22px;
+            border-radius: 99px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .btn:hover {
+            transform: scale(1.05) translateY(-2px);
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.25);
+        }
+
+        /* 苹果原生进度条 */
+        .progress-container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .progress-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 99px;
+            background: rgba(255, 255, 255, 0.15);
+            outline: none;
+            cursor: pointer;
+        }
+
+        .light-theme .progress-slider {
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .progress-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            transition: transform 0.1s ease;
+        }
+
+        .progress-slider:active::-webkit-slider-thumb {
+            transform: scale(1.3);
+        }
+
+        .time-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-normal);
+            font-weight: 600;
+        }
+
+        /* 右侧歌词面板 */
+        .lyric-panel {
+            width: 58%;
+            height: 100vh;
+            overflow-y: scroll; 
+            position: relative;
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch; 
+            scrollbar-width: none; 
+            mask-image: linear-gradient(to bottom, transparent 0%, white 15%, white 85%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, white 15%, white 85%, transparent 100%);
+        }
+
+        .lyric-panel::-webkit-scrollbar {
+            display: none; 
+        }
+
+        .lyric-wrapper {
+            width: 100%;
+            padding-left: 8%;
+            padding-right: 18%;
+            box-sizing: border-box;
+            padding-top: 42vh; 
+            padding-bottom: 50vh;
+            transition: filter 0.5s ease;
+        }
+
+        .lyric-line {
+            padding: var(--line-padding) 0;
+            font-size: var(--lyric-font-size);
+            font-weight: 800;
+            line-height: 1.35;
+            letter-spacing: -1px;
+            transition: padding 0.4s ease, color 0.6s ease, transform 0.6s cubic-bezier(0.25, 1, 0.3, 1.1), opacity 0.6s ease, filter 0.6s ease;
+            transform-origin: left center;
+            filter: blur(1.2px);
+            opacity: 0.22;
+            cursor: pointer;
+        }
+
+        .lyric-line:hover {
+            opacity: 0.7;
+            filter: blur(0);
+        }
+
+        .lyric-line.active {
+            color: var(--text-active);
+            opacity: 1;
+            filter: blur(0);
+            transform: scale(1.03) translateZ(0);
+            text-shadow: var(--text-shadow);
+        }
+
+        /* ==========================================
+           🎨 Apple Music 原生引导欢迎卡片 (iOS Style)
+           ========================================== */
+        .onboarding-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(1);
+            width: 86%;
+            max-width: 340px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border-radius: 28px;
+            padding: 30px 24px;
+            text-align: center;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.4);
+            z-index: 1000;
+            transition: opacity 0.5s cubic-bezier(0.25, 1, 0.5, 1), transform 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        .light-theme .onboarding-overlay {
+            background: rgba(255, 255, 255, 0.45);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.06);
+        }
+
+        .onboarding-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: translate(-50%, -45%) scale(0.9);
+        }
+
+        .onboarding-title {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--text-active);
+            margin: 0 0 10px 0;
+            letter-spacing: -0.5px;
+        }
+
+        .onboarding-desc {
+            font-size: 0.9rem;
+            line-height: 1.45;
+            color: var(--text-normal);
+            margin: 0 0 25px 0;
+        }
+
+        .onboarding-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .onboarding-btn {
+            width: 100%;
+            padding: 14px;
+            border-radius: 16px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+
+        .onboarding-btn.primary {
+            background: #ff2d55;
+            color: white;
+            box-shadow: 0 8px 20px rgba(255, 45, 85, 0.3);
+        }
+
+        .onboarding-btn.secondary {
+            background: var(--glass-bg);
+            color: var(--text-active);
+            border: 1px solid var(--glass-border);
+        }
+
+        .onboarding-btn:active {
+            transform: scale(0.97);
+        }
+
+        /* ==========================================
+           📱 移动端自适应
+           ========================================== */
+        @media (max-width: 768px) and (orientation: portrait) {
+            body { flex-direction: column; }
+            .main-layout { flex-direction: column; }
+            
+            .player-panel {
+                display: none; /* 在手机端隐藏PC侧边栏 */
+            }
+
+            .lyric-panel { 
+                width: 100%; 
+                height: 100vh;
+                position: absolute;
+                top: 0;
+                left: 0;
+                z-index: 5;
+            }
+
+            /* 如果未准备就绪，模糊背景歌词以突出引导卡片 */
+            .lyric-panel.onboarding-active .lyric-wrapper {
+                filter: blur(10px);
+                opacity: 0.15;
+            }
+
+            .lyric-wrapper { 
+                padding-left: 32px; 
+                padding-right: 32px; 
+                padding-top: 20vh; 
+                padding-bottom: 32vh;
+            }
+
+            .lyric-line { 
+                font-size: 1.95rem; 
+                padding: 16px 0;
+            }
+
+            /* 📱 底部高斯模糊控制中心 */
+            .mobile-bottom-bar {
+                display: flex !important;
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                width: 100%;
+                background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.45) 75%, transparent 100%);
+                backdrop-filter: blur(25px);
+                -webkit-backdrop-filter: blur(25px);
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                padding: 20px 24px calc(24px + env(safe-area-inset-bottom)) 24px;
+                flex-direction: column;
+                gap: 16px;
+                z-index: 100;
+            }
+            
+            .light-theme .mobile-bottom-bar {
+                background: linear-gradient(to top, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.4) 75%, transparent 100%);
+                border-top: 1px solid rgba(0, 0, 0, 0.05);
+            }
+        }
+
+        .mobile-bottom-bar {
+            display: none;
+        }
+
+        .m-player-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .m-album-art {
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            background-size: cover;
+            background-position: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        }
+
+        .m-metadata {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .m-track-name {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-active);
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .m-artist-name {
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: var(--text-normal);
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .m-controls {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .m-btn {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            color: var(--text-active);
+            font-size: 1.1rem;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease;
+        }
+
+        .m-btn:active {
+            transform: scale(0.9);
+        }
+
+        @media (max-height: 500px) and (orientation: landscape) {
+            .player-panel { width: 35%; padding: 20px; }
+            .album-container { width: 140px; height: 140px; margin-bottom: 10px; }
+            .track-name { font-size: 1.15rem; }
+            .artist-name { font-size: 0.85rem; }
+            .lyric-panel { width: 65%; }
+            .lyric-line { font-size: 1.35rem; padding: 12px 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 极光离屏背景 -->
+    <div class="ambient-background">
+        <div class="bg-layer layer-1 active" id="layer1">
+            <div class="blob blob-1"></div>
+            <div class="blob blob-2"></div>
+            <div class="blob blob-3"></div>
+            <div class="blob blob-4"></div>
+        </div>
+        <div class="bg-layer layer-2" id="layer2">
+            <div class="blob blob-1"></div>
+            <div class="blob blob-2"></div>
+            <div class="blob blob-3"></div>
+            <div class="blob blob-4"></div>
+        </div>
+    </div>
+
+    <!-- 主布局 -->
+    <div class="main-layout">
+        <!-- 左侧控制台（PC 端） -->
+        <div class="player-panel">
+            <div class="album-container">
+                <div class="album-art" id="albumArt" onmousemove="tiltCover(event)" onmouseleave="resetTiltCover()" style="background-image: url('https://via.placeholder.com/320');"></div>
+            </div>
+            <div class="track-metadata">
+                <h1 class="track-name" id="trackName">准备就绪</h1>
+                <p class="artist-name" id="artistName">连接 Spotify 账号或启动测试</p>
+            </div>
+            
+            <div class="control-bar">
+                <div class="progress-container">
+                    <input type="range" class="progress-slider" id="playbackSlider" min="0" max="100" value="0" oninput="onSliderDrag(this.value)" onchange="onSliderRelease(this.value)">
+                    <div class="time-info">
+                        <span id="timeCurrent">0:00</span>
+                        <span id="timeTotal">0:00</span>
+                    </div>
+                </div>
+
+                <div class="buttons-row">
+                    <button class="btn" onclick="toggleTheme()" title="切换主题">🌓</button>
+                    <button class="btn" id="login-btn" onclick="login()" title="连接 Spotify">🔗 授权连接</button>
+                    <button class="btn" id="demo-btn" onclick="toggleDemoMode()" title="启动测试Demo">🧪 演示模式</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧歌词面板 -->
+        <div class="lyric-panel onboarding-active" id="lyricContainer">
+            <!-- 📱 Apple Music 原生首屏引导欢迎卡片 -->
+            <div class="onboarding-overlay" id="onboardingOverlay">
+                <h2 class="onboarding-title">沉浸式歌词同步</h2>
+                <p class="onboarding-desc">欢迎体验 Apple Music 质感的全屏歌词流。连接您的 Spotify 账号或开启本地演示模式即可开始。</p>
+                <div class="onboarding-buttons">
+                    <button class="onboarding-btn primary" onclick="login()">🔗 连接 Spotify 账号</button>
+                    <button class="onboarding-btn secondary" onclick="toggleDemoMode()">🧪 开启本地演示模式</button>
+                </div>
+            </div>
+
+            <div class="lyric-wrapper" id="lyricWrapper">
+                <div class="lyric-line active">歌词将在此处伴随苹果动效实时同步</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📱 手机端专用底部悬浮控制台 -->
+    <div class="mobile-bottom-bar" id="mobileBottomBar">
+        <div class="m-player-info">
+            <div class="m-album-art" id="mAlbumArt" style="background-image: url('https://via.placeholder.com/120');"></div>
+            <div class="m-metadata">
+                <p class="m-track-name" id="mTrackName">准备就绪</p>
+                <p class="m-artist-name" id="mArtistName">演示模式或授权连接</p>
+            </div>
+            <div class="m-controls">
+                <button class="m-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
+                <button class="m-btn" id="m-login-btn" onclick="login()" title="连接 Spotify">🔗</button>
+                <button class="m-btn" id="m-demo-btn" onclick="toggleDemoMode()" title="演示模式">🧪</button>
+            </div>
+        </div>
+        <div class="progress-container">
+            <input type="range" class="progress-slider" id="mPlaybackSlider" min="0" max="100" value="0" oninput="onSliderDrag(this.value)" onchange="onSliderRelease(this.value)">
+            <div class="time-info">
+                <span id="mTimeCurrent">0:00</span>
+                <span id="mTimeTotal">0:00</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const clientId = '4be054489dd84fb092a85cdcab057c5e'; 
+        const redirectUri = window.location.origin + window.location.pathname; 
+        const scopes = 'user-read-currently-playing user-read-playback-state user-modify-playback-state';
+
+        let accessToken = null;
+        let refreshToken = null;
+        let currentTrackId = null;
+        let lyrics = [];
+        let isPlaying = false;
+        
+        let progressAnchor = 0;   
+        let timeAnchor = 0;       
+        let totalDurationMs = 0;  
+
+        let isUserScrolling = false;
+        let userScrollTimeout = null;
+        let isDraggingSlider = false;
+
+        let activeLayer = 1;
+        let isDemoMode = false;
+
+        const mockTrack = {
+            name: "Whole Different Animal",
+            artists: [{ name: "aespa, G-DRAGON" }],
+            duration_ms: 198000,
+            album: { images: [{ url: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400&q=80" }] }
+        };
+
+        const mockLrc = `
+        [00:00.00] 欢迎进入 Apple Music 级沉浸式体验 🚀
+        [00:04.00] 针对极光色域算法进行了深度重构与 Bug 修复
+        [00:08.00] Canvas 跨域崩溃问题已彻底被拦截和解决
+        [00:12.50] 后台标签页漂移 Bug 已经改用高精度时钟锚定算法
+        [00:17.00] 拖拽或者上下滑动歌词将暂停对焦 4 秒钟
+        [00:21.00] 随后将自动平滑回弹到当前这句
+        [00:25.50] 手机竖屏排版 100% 复刻了 iOS 的底栏与大歌词流
+        [00:30.00] 点击任意一句歌词，播放进度会瞬时跳转
+        [00:34.00] Iced up but furious, my scars, so glorious
+        [00:39.00] She's a whole different animal, different animal
+        [00:44.00] 极光模糊半径加大到 140 像素，色彩渲染深邃优雅
+        [00:49.00] 配合不规则波动路径，打造完美液体流沙
+        [00:54.00] 点击底部的 🌓 按钮可以切换亮白主题
+        [00:59.00] 感谢您的测试，祝您听歌愉快！✨
+        [01:05.00] (测试即将自动循环重头播放...)
+        `;
+
+        // ==========================================
+        // 💎 PC端封面 3D 浮雕交互视觉
+        // ==========================================
+        function tiltCover(event) {
+            const card = document.getElementById('albumArt');
+            const rect = card.getBoundingClientRect();
+            const x = event.clientX - rect.left - (rect.width/2);
+            const y = event.clientY - rect.top - (rect.height/2);
+            const rotateX = -(y / (rect.height/2)) * 12; 
+            const rotateY = (x / (rect.width/2)) * 12;
+            card.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.05)`;
+            card.style.boxShadow = `${-rotateY * 2}px ${rotateX * 2}px 50px rgba(0,0,0,0.5), 0 30px 60px var(--shadow)`;
+        }
+
+        function resetTiltCover() {
+            const card = document.getElementById('albumArt');
+            card.style.transform = `rotateX(0deg) rotateY(0deg) scale(1)`;
+            card.style.boxShadow = `0 30px 60px var(--shadow)`;
+        }
+
+        function toggleTheme() {
+            document.body.classList.toggle('light-theme');
+            localStorage.setItem('preferred-theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
+        }
+
+        if (localStorage.getItem('preferred-theme') === 'light') {
+            document.body.classList.add('light-theme');
+        }
+
+        // 隐藏引导卡片
+        function hideOnboarding() {
+            document.getElementById('onboardingOverlay').classList.add('hidden');
+            document.getElementById('lyricContainer').classList.remove('onboarding-active');
+        }
+
+        // ==========================================
+        // 🧪 一键演示 Demo 逻辑
+        // ==========================================
+        function toggleDemoMode() {
+            if (isDemoMode) {
+                location.reload(); 
+                return;
+            }
+            
+            isDemoMode = true;
+            isPlaying = true;
+            
+            hideOnboarding();
+            setPlaybackProgress(0, mockTrack.duration_ms);
+            
+            // 同步更新手机和PC侧演示按钮颜色
+            const pcDemo = document.getElementById('demo-btn');
+            const mDemo = document.getElementById('m-demo-btn');
+            if (pcDemo) {
+                pcDemo.style.borderColor = "#ff2d55";
+                pcDemo.style.color = "#ff2d55";
+            }
+            if (mDemo) {
+                mDemo.style.borderColor = "#ff2d55";
+                mDemo.style.color = "#ff2d55";
+            }
+            
+            updateUI(mockTrack);
+            parseLrc(mockLrc);
+            renderLyrics();
+            
+            startLocalTimer();
+            setupDragListeners();
+        }
+
+        // ==========================================
+        // 🎨 取色系统
+        // ==========================================
+        async function extractAndApplyColors(imageUrl) {
+            let colors = [];
+            try {
+                colors = await getPaletteFromUrl(imageUrl);
+            } catch (err) {
+                colors = getFallbackColors();
+            }
+
+            const nextLayerId = activeLayer === 1 ? 'layer2' : 'layer1';
+            const nextLayer = document.getElementById(nextLayerId);
+            const blobs = nextLayer.querySelectorAll('.blob');
+            
+            blobs[0].style.backgroundColor = colors[0];
+            blobs[1].style.backgroundColor = colors[1];
+            blobs[2].style.backgroundColor = colors[2];
+            blobs[3].style.backgroundColor = colors[3];
+            
+            document.getElementById('layer1').classList.toggle('active', nextLayerId === 'layer1');
+            document.getElementById('layer2').classList.toggle('active', nextLayerId === 'layer2');
+            
+            activeLayer = activeLayer === 1 ? 2 : 1;
+        }
+
+        function getPaletteFromUrl(url) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'Anonymous'; 
+                img.src = url;
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = 10; 
+                        canvas.height = 10;
+                        ctx.drawImage(img, 0, 0, 10, 10);
+                        const imgData = ctx.getImageData(0, 0, 10, 10).data;
+                        
+                        const colors = [
+                            `rgb(${imgData[0]}, ${imgData[1]}, ${imgData[2]})`,
+                            `rgb(${imgData[40]}, ${imgData[41]}, ${imgData[42]})`,
+                            `rgb(${imgData[120]}, ${imgData[121]}, ${imgData[122]})`,
+                            `rgb(${imgData[200]}, ${imgData[201]}, ${imgData[202]})`
+                        ];
+                        resolve(colors);
+                    } catch (e) {
+                        reject(e);
+                    }
+                };
+                img.onerror = (err) => reject(err);
+            });
+        }
+
+        function getFallbackColors() {
+            return ["#ff2d55", "#5856d6", "#af52de", "#007aff"];
+        }
+
+        // ==========================================
+        // 歌词点击跳转
+        // ==========================================
+        async function seekSpotify(timeMs) {
+            if (isDemoMode) {
+                setPlaybackProgress(timeMs, totalDurationMs);
+                isUserScrolling = false;
+                return;
+            }
+            if (!accessToken) return;
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${timeMs}`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                setPlaybackProgress(timeMs, totalDurationMs);
+                isUserScrolling = false; 
+            } catch (err) {
+                console.error('Spotify 跳转失败:', err);
+            }
+        }
+
+        // ==========================================
+        // PKCE 登录认证
+        // ==========================================
+        function generateRandomString(length) {
+            let text = '';
+            const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+            for (let i = 0; i < length; i++) {
+                text += possible.charAt(Math.floor(Math.random() * possible.length));
+            }
+            return text;
+        }
+
+        async function generateCodeChallenge(codeVerifier) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(codeVerifier);
+            const digest = await window.crypto.subtle.digest('SHA-256', data);
+            return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/, '');
+        }
+
+        async function login() {
+            const codeVerifier = generateRandomString(64);
+            const codeChallenge = await generateCodeChallenge(codeVerifier);
+            window.localStorage.setItem('code_verifier', codeVerifier);
+
+            const params = new URLSearchParams({
+                response_type: 'code',
+                client_id: clientId,
+                scope: scopes,
+                code_challenge_method: 'S256',
+                code_challenge: codeChallenge,
+                redirect_uri: redirectUri,
+                show_dialog: 'true'
+            });
+
+            window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+        }
+
+        async function checkAuth() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            const storedToken = window.localStorage.getItem('access_token');
+            const storedRefreshToken = window.localStorage.getItem('refresh_token');
+            if (storedToken) {
+                accessToken = storedToken;
+                refreshToken = storedRefreshToken;
+                onLoginSuccess();
+                return;
+            }
+
+            if (code) {
+                const codeVerifier = window.localStorage.getItem('code_verifier');
+                window.history.replaceState({}, document.title, window.location.pathname);
+
+                try {
+                    const response = await fetch('https://accounts.spotify.com/api/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            client_id: clientId,
+                            grant_type: 'authorization_code',
+                            code: code,
+                            redirect_uri: redirectUri,
+                            code_verifier: codeVerifier,
+                        }),
+                    });
+
+                    const data = await response.json();
+                    if (data.access_token) {
+                        handleTokenResponse(data);
+                    }
+                } catch (err) {
+                    console.error('兑换 Token 失败:', err);
+                }
+            }
+        }
+
+        function handleTokenResponse(data) {
+            accessToken = data.access_token;
+            if (data.refresh_token) {
+                refreshToken = data.refresh_token;
+                window.localStorage.setItem('refresh_token', refreshToken);
+            }
+            window.localStorage.setItem('access_token', accessToken);
+            
+            const expiresIn = data.expires_in || 3600;
+            setTimeout(refreshAccessToken, (expiresIn - 60) * 1000);
+
+            onLoginSuccess();
+        }
+
+        async function refreshAccessToken() {
+            if (!refreshToken) return;
+            try {
+                const response = await fetch('https://accounts.spotify.com/api/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'refresh_token',
+                        refresh_token: refreshToken,
+                        client_id: clientId,
+                    }),
+                });
+
+                const data = await response.json();
+                if (data.access_token) {
+                    handleTokenResponse(data);
+                }
+            } catch (err) {
+                console.error('刷新 Token 失败:', err);
+            }
+        }
+
+        function onLoginSuccess() {
+            hideOnboarding();
+
+            // 完美更新 PC & 移动端授权状态
+            const pcLogin = document.getElementById('login-btn');
+            const mLogin = document.getElementById('m-login-btn');
+            if (pcLogin) {
+                pcLogin.innerText = "✅ 已连接";
+                pcLogin.style.borderColor = "#1db954";
+                pcLogin.style.color = "#1db954";
+            }
+            if (mLogin) {
+                mLogin.innerText = "✅";
+                mLogin.style.borderColor = "#1db954";
+                mLogin.style.color = "#1db954";
+            }
+
+            startPolling();
+            startLocalTimer();
+            setupDragListeners(); 
+        }
+
+        // ==========================================
+        // 手势触拽监听
+        // ==========================================
+        function setupDragListeners() {
+            const container = document.getElementById('lyricContainer');
+
+            const handleUserInteraction = () => {
+                isUserScrolling = true;
+                clearTimeout(userScrollTimeout);
+                userScrollTimeout = setTimeout(() => {
+                    isUserScrolling = false;
+                }, 4000); 
+            };
+
+            container.addEventListener('touchstart', handleUserInteraction, { passive: true });
+            container.addEventListener('wheel', handleUserInteraction, { passive: true });
+            container.addEventListener('pointerdown', handleUserInteraction, { passive: true });
+        }
+
+        // ==========================================
+        // 进度条拖拽控制
+        // ==========================================
+        function onSliderDrag(value) {
+            isDraggingSlider = true;
+            const targetMs = (value / 100) * totalDurationMs;
+            document.getElementById('timeCurrent').innerText = formatTime(targetMs);
+            document.getElementById('mTimeCurrent').innerText = formatTime(targetMs);
+        }
+
+        function onSliderRelease(value) {
+            isDraggingSlider = false;
+            const targetMs = (value / 100) * totalDurationMs;
+            seekSpotify(targetMs);
+        }
+
+        // ==========================================
+        // 时间同步锚定系统
+        // ==========================================
+        function setPlaybackProgress(currentMs, durationMs) {
+            progressAnchor = currentMs;
+            timeAnchor = performance.now();
+            totalDurationMs = durationMs;
+        }
+
+        function getPreciseProgress() {
+            if (!isPlaying) return progressAnchor;
+            const elapsed = performance.now() - timeAnchor;
+            return Math.min(progressAnchor + elapsed, totalDurationMs);
+        }
+
+        // ==========================================
+        // 状态轮询
+        // ==========================================
+        async function fetchSpotifyState() {
+            if (isDemoMode) return; 
+            if (!accessToken) return;
+            try {
+                const response = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+
+                if (response.status === 204) return;
+                if (response.status === 401) {
+                    await refreshAccessToken();
+                    return;
+                }
+
+                const data = await response.json();
+                if (!data || !data.item) return;
+
+                const track = data.item;
+                isPlaying = data.is_playing;
+                
+                setPlaybackProgress(data.progress_ms, track.duration_ms);
+
+                if (track.id !== currentTrackId) {
+                    currentTrackId = track.id;
+                    updateUI(track);
+                    await getLyrics(track.name, track.artists[0].name);
+                }
+            } catch (err) {
+                console.error('获取状态错误:', err);
+            }
+        }
+
+        function updateUI(track) {
+            const coverUrl = track.album.images[0].url;
+            
+            document.getElementById('trackName').innerText = track.name;
+            document.getElementById('artistName').innerText = track.artists.map(a => a.name).join(', ');
+            document.getElementById('albumArt').style.backgroundImage = `url(${coverUrl})`;
+            
+            document.getElementById('mTrackName').innerText = track.name;
+            document.getElementById('mArtistName').innerText = track.artists.map(a => a.name).join(', ');
+            document.getElementById('mAlbumArt').style.backgroundImage = `url(${coverUrl})`;
+            
+            extractAndApplyColors(coverUrl);
+        }
+
+        async function getLyrics(trackName, artistName) {
+            document.getElementById('lyricWrapper').innerHTML = '<div class="lyric-line active">正在为您同步歌词...</div>';
+            lyrics = [];
+            
+            try {
+                const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artistName)}&track_name=${encodeURIComponent(trackName)}`;
+                const response = await fetch(url);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.syncedLyrics) {
+                        parseLrc(data.syncedLyrics);
+                        renderLyrics();
+                        return;
+                    }
+                }
+                document.getElementById('lyricWrapper').innerHTML = '<div class="lyric-line active">暂无同步歌词 😭</div>';
+            } catch (e) {
+                document.getElementById('lyricWrapper').innerHTML = '<div class="lyric-line active">网络加载失败，请重试</div>';
+            }
+        }
+
+        function parseLrc(lrcStr) {
+            const lines = lrcStr.split('\n');
+            const timeReg = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
+            lyrics = [];
+
+            lines.forEach(line => {
+                const match = timeReg.exec(line);
+                if (match) {
+                    const minutes = parseInt(match[1]);
+                    const seconds = parseInt(match[2]);
+                    const ms = parseInt(match[3]);
+                    const msAdjust = match[3].length === 2 ? ms * 10 : ms;
+                    const time = minutes * 60 * 1000 + seconds * 1000 + msAdjust;
+                    const text = line.replace(timeReg, '').trim();
+                    if (text) lyrics.push({ time, text });
+                }
+            });
+        }
+
+        function renderLyrics() {
+            const lyricWrapper = document.getElementById('lyricWrapper');
+            lyricWrapper.innerHTML = lyrics.map((item, index) => {
+                return `<div class="lyric-line" id="line-${index}" onclick="seekSpotify(${item.time})">${item.text}</div>`;
+            }).join('');
+        }
+
+        function startLocalTimer() {
+            function update() {
+                const currentProgressMs = getPreciseProgress();
+
+                if (isDemoMode && isPlaying && currentProgressMs >= totalDurationMs) {
+                    setPlaybackProgress(0, totalDurationMs);
+                }
+
+                if (!isDraggingSlider && totalDurationMs > 0) {
+                    const ratio = (currentProgressMs / totalDurationMs) * 100;
+                    
+                    document.getElementById('playbackSlider').value = ratio;
+                    document.getElementById('mPlaybackSlider').value = ratio;
+                    
+                    const timeStr = formatTime(currentProgressMs);
+                    document.getElementById('timeCurrent').innerText = timeStr;
+                    document.getElementById('mTimeCurrent').innerText = timeStr;
+                    
+                    const totalStr = formatTime(totalDurationMs);
+                    document.getElementById('timeTotal').innerText = totalStr;
+                    document.getElementById('mTimeTotal').innerText = totalStr;
+                }
+
+                syncLyrics(currentProgressMs);
+                requestAnimationFrame(update);
+            }
+            requestAnimationFrame(update);
+        }
+
+        const lyricContainer = document.getElementById('lyricContainer');
+        const lyricWrapper = document.getElementById('lyricWrapper');
+
+        // ==========================================
+        // 🎯 滚屏对焦算法
+        // ==========================================
+        function syncLyrics(currentProgressMs) {
+            if (lyrics.length === 0) return;
+
+            let activeIndex = -1;
+            for (let i = 0; i < lyrics.length; i++) {
+                if (currentProgressMs >= lyrics[i].time) {
+                    activeIndex = i;
+                } else {
+                    break;
+                }
+            }
+
+            if (activeIndex !== -1) {
+                const activeLine = document.getElementById(`line-${activeIndex}`);
+                if (activeLine && !activeLine.classList.contains('active')) {
+                    const activeElements = lyricWrapper.querySelectorAll('.lyric-line.active');
+                    activeElements.forEach(el => el.classList.remove('active'));
+
+                    activeLine.classList.add('active');
+
+                    if (!isUserScrolling) {
+                        const containerHeight = lyricContainer.clientHeight;
+                        const lineOffsetTop = activeLine.offsetTop;
+                        
+                        const alignRatio = 0.25; 
+                        const targetScrollTop = lineOffsetTop - containerHeight * alignRatio;
+                        
+                        lyricContainer.scrollTo({
+                            top: targetScrollTop,
+                            behavior: 'smooth'
+                        });
+                    }
+                }
+            }
+        }
+
+        function formatTime(ms) {
+            const totalSec = Math.floor(ms / 1000);
+            const m = Math.floor(totalSec / 60);
+            const s = totalSec % 60;
+            return `${m}:${s < 10 ? '0' : ''}${s}`;
+        }
+
+        function startPolling() {
+            fetchSpotifyState();
+            setInterval(fetchSpotifyState, 2000); 
+        }
+
+        window.onload = checkAuth;
+    </script>
+</body>
+</html>
